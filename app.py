@@ -68,13 +68,13 @@ def process_bank_data(bank_df):
     # Remove empty rows
     bank_df = bank_df.dropna(how="all").reset_index(drop=True)
 
-    # Convert all columns to string for safety
+    # Convert everything to string
     bank_df = bank_df.fillna("").astype(str)
 
-    # Try to detect header row
+    # -------- STEP 1: Detect Header Row --------
     header_found = False
 
-    for i in range(min(5, len(bank_df))):
+    for i in range(min(10, len(bank_df))):
         row = bank_df.iloc[i].apply(lambda x: str(x).lower())
 
         if any("date" in cell for cell in row):
@@ -83,17 +83,19 @@ def process_bank_data(bank_df):
             header_found = True
             break
 
-    # If no header found → assign generic names
+    # -------- STEP 2: If header not found --------
     if not header_found:
-        st.warning("⚠️ Using generic column parsing")
+        st.warning("⚠️ Header not detected. Using generic parsing")
         bank_df.columns = [f"col_{i}" for i in range(len(bank_df.columns))]
 
     # Clean column names
     bank_df.columns = [str(col).strip() for col in bank_df.columns]
 
-    # -------- TRY BEST GUESS --------
+    # -------- STEP 3: Smart Column Guess --------
     date_col = None
     desc_col = None
+    debit_col = None
+    credit_col = None
     amount_col = None
 
     for col in bank_df.columns:
@@ -101,37 +103,48 @@ def process_bank_data(bank_df):
 
         if "date" in col_lower:
             date_col = col
-        elif "narration" in col_lower or "description" in col_lower:
+        elif "narration" in col_lower or "description" in col_lower or "details" in col_lower:
             desc_col = col
-        elif "amount" in col_lower or "withdraw" in col_lower or "debit" in col_lower:
+        elif "withdraw" in col_lower or "debit" in col_lower:
+            debit_col = col
+        elif "deposit" in col_lower or "credit" in col_lower:
+            credit_col = col
+        elif "amount" in col_lower:
             amount_col = col
 
-    # -------- FALLBACK IF NOT FOUND --------
+    # -------- STEP 4: Fallback --------
+    cols = bank_df.columns.tolist()
+
     if not date_col:
-        date_col = bank_df.columns[0]
+        date_col = cols[0]
 
     if not desc_col:
-        desc_col = bank_df.columns[1] if len(bank_df.columns) > 1 else bank_df.columns[0]
+        desc_col = cols[1] if len(cols) > 1 else cols[0]
 
-    if not amount_col:
-        amount_col = bank_df.columns[-1]
+    if debit_col:
+        amount_series = bank_df[debit_col]
+    elif amount_col:
+        amount_series = bank_df[amount_col]
+    else:
+        amount_series = bank_df[cols[-1]]
 
-    st.info(f"Using columns → Date: {date_col}, Desc: {desc_col}, Amount: {amount_col}")
-
-    # Rename
+    # -------- STEP 5: Rename --------
     bank_df.rename(columns={
         date_col: "Date",
-        desc_col: "Description",
-        amount_col: "Amount"
+        desc_col: "Description"
     }, inplace=True)
 
-    # Convert amount safely
-    bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0).abs()
+    bank_df["Amount"] = pd.to_numeric(amount_series, errors='coerce').fillna(0).abs()
 
-    # Remove zero rows
+    # -------- STEP 6: Filter --------
     bank_df = bank_df[bank_df["Amount"] > 0]
 
+    # -------- DEBUG --------
+    st.info(f"Detected → Date: {date_col}, Desc: {desc_col}")
+
     return bank_df
+
+
 # ---------------- APP UI ----------------
 st.title("💰 AI Financial Advisor Agent")
 
