@@ -68,77 +68,70 @@ def process_bank_data(bank_df):
     # Remove empty rows
     bank_df = bank_df.dropna(how="all").reset_index(drop=True)
 
-    # -------- FIXED HEADER DETECTION --------
+    # Convert all columns to string for safety
+    bank_df = bank_df.fillna("").astype(str)
+
+    # Try to detect header row
     header_found = False
 
     for i in range(min(5, len(bank_df))):
+        row = bank_df.iloc[i].apply(lambda x: str(x).lower())
 
-        row = bank_df.iloc[i]
-        row_values = [str(cell).lower() for cell in row if pd.notna(cell)]
-
-        if any("date" in cell for cell in row_values):
+        if any("date" in cell for cell in row):
             bank_df.columns = bank_df.iloc[i]
             bank_df = bank_df[i+1:]
             header_found = True
             break
 
+    # If no header found → assign generic names
     if not header_found:
-        st.error("❌ Could not detect header row (Date column missing)")
-        st.stop()
+        st.warning("⚠️ Using generic column parsing")
+        bank_df.columns = [f"col_{i}" for i in range(len(bank_df.columns))]
 
-    # -------- CLEAN COLUMN NAMES --------
+    # Clean column names
     bank_df.columns = [str(col).strip() for col in bank_df.columns]
 
-    # Remove unnamed columns
-    bank_df = bank_df.loc[:, ~bank_df.columns.str.contains('^Unnamed')]
-
-    # -------- DETECT REQUIRED COLUMNS --------
-    desc_col, withdraw_col, deposit_col, date_col = None, None, None, None
+    # -------- TRY BEST GUESS --------
+    date_col = None
+    desc_col = None
+    amount_col = None
 
     for col in bank_df.columns:
         col_lower = col.lower()
 
-        if "narration" in col_lower or "description" in col_lower:
-            desc_col = col
-        elif "withdraw" in col_lower or "debit" in col_lower:
-            withdraw_col = col
-        elif "deposit" in col_lower or "credit" in col_lower:
-            deposit_col = col
-        elif "date" in col_lower:
+        if "date" in col_lower:
             date_col = col
+        elif "narration" in col_lower or "description" in col_lower:
+            desc_col = col
+        elif "amount" in col_lower or "withdraw" in col_lower or "debit" in col_lower:
+            amount_col = col
 
-    # -------- VALIDATION --------
-    if not desc_col:
-        st.error("❌ Description column not found")
-        st.stop()
-
-    if not withdraw_col:
-        st.error("❌ Withdrawal column not found")
-        st.stop()
-
+    # -------- FALLBACK IF NOT FOUND --------
     if not date_col:
-        st.error("❌ Date column not found")
-        st.stop()
+        date_col = bank_df.columns[0]
 
-    # -------- RENAME --------
+    if not desc_col:
+        desc_col = bank_df.columns[1] if len(bank_df.columns) > 1 else bank_df.columns[0]
+
+    if not amount_col:
+        amount_col = bank_df.columns[-1]
+
+    st.info(f"Using columns → Date: {date_col}, Desc: {desc_col}, Amount: {amount_col}")
+
+    # Rename
     bank_df.rename(columns={
+        date_col: "Date",
         desc_col: "Description",
-        date_col: "Date"
+        amount_col: "Amount"
     }, inplace=True)
 
-    # -------- CREATE AMOUNT --------
-    bank_df["Amount"] = bank_df[withdraw_col].fillna(0)
-    bank_df["Income"] = bank_df[deposit_col].fillna(0) if deposit_col else 0
-
-    # -------- CLEAN DATA --------
+    # Convert amount safely
     bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0).abs()
-    bank_df["Income"] = pd.to_numeric(bank_df["Income"], errors='coerce').fillna(0).abs()
 
-    # Filter valid rows
-    bank_df = bank_df[(bank_df["Amount"] > 0) | (bank_df["Income"] > 0)]
+    # Remove zero rows
+    bank_df = bank_df[bank_df["Amount"] > 0]
 
     return bank_df
-
 # ---------------- APP UI ----------------
 st.title("💰 AI Financial Advisor Agent")
 
@@ -191,6 +184,8 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
+
+st.write("Processed Data:", bank_df.head())
 
 
 # ---------------- ADD EXPENSE ----------------
