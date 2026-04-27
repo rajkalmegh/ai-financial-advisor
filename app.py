@@ -13,65 +13,91 @@ st.title("💰 AI Financial Advisor Agent")
 # ---------------- LOAD DATA ----------------
 df = load_data()
 
+# ---------------- USER SETTINGS ----------------
+st.subheader("⚙️ Personal Settings")
+
+colA, colB = st.columns(2)
+
+with colA:
+    salary = st.number_input("Monthly Salary (₹)", min_value=0)
+
+with colB:
+    saving_goal = st.number_input("Saving Goal (₹)", min_value=0)
+
+mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
+
 # ---------------- FILE UPLOAD ----------------
 st.subheader("📂 Upload Bank Statement")
 
-uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx", "xls"])
-
+uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
 
 # ---------------- CATEGORY LOGIC ----------------
-def categorize_expense(description):
-    description = str(description).lower()
+def categorize_expense(desc):
+    desc = str(desc).lower()
 
-    if "swiggy" in description or "zomato" in description:
+    if "swiggy" in desc or "zomato" in desc:
         return "Food"
-    elif "uber" in description or "ola" in description or "fuel" in description:
+    elif "uber" in desc or "ola" in desc or "fuel" in desc:
         return "Travel"
-    elif "amazon" in description or "flipkart" in description:
+    elif "amazon" in desc or "flipkart" in desc:
         return "Shopping"
-    elif "electricity" in description or "bill" in description:
+    elif "bill" in desc or "electricity" in desc:
         return "Bills"
+    elif "salary" in desc:
+        return "Income"
     else:
         return "Other"
 
+# ---------------- BANK PROCESSOR ----------------
+def process_bank_data(bank_df):
 
-# ---------------- FILE PROCESSING ----------------
+    bank_df.columns = [col.strip() for col in bank_df.columns]
+
+    # Detect columns
+    desc_col, withdraw_col, deposit_col = None, None, None
+
+    for col in bank_df.columns:
+        if "narration" in col.lower() or "description" in col.lower():
+            desc_col = col
+        if "withdraw" in col.lower() or "debit" in col.lower():
+            withdraw_col = col
+        if "deposit" in col.lower() or "credit" in col.lower():
+            deposit_col = col
+
+    if not desc_col:
+        st.error("❌ Description column not found")
+        st.stop()
+
+    bank_df.rename(columns={desc_col: "Description"}, inplace=True)
+
+    # Amount logic
+    bank_df["Amount"] = bank_df[withdraw_col].fillna(0) if withdraw_col else 0
+    bank_df["Income"] = bank_df[deposit_col].fillna(0) if deposit_col else 0
+
+    bank_df["Amount"] = bank_df["Amount"].abs()
+    bank_df["Income"] = bank_df["Income"].abs()
+
+    bank_df = bank_df[(bank_df["Amount"] > 0) | (bank_df["Income"] > 0)]
+
+    # Date handling
+    if "Date" not in bank_df.columns:
+        st.error("❌ Date column missing")
+        st.stop()
+
+    return bank_df
+
+# ---------------- PROCESS FILE ----------------
 if uploaded_file is not None:
     try:
-        # Detect file type
         if uploaded_file.name.endswith(".csv"):
             bank_df = pd.read_csv(uploaded_file)
         else:
             bank_df = pd.read_excel(uploaded_file)
 
-        st.write("Preview of Uploaded Data:")
-        st.write(bank_df.head())
+        st.write("Preview:", bank_df.head())
 
-        # -------- HANDLE HDFC FORMAT --------
-        if "Narration" in bank_df.columns:
-            bank_df.rename(columns={"Narration": "Description"}, inplace=True)
+        bank_df = process_bank_data(bank_df)
 
-        if "Withdrawal Amt" in bank_df.columns:
-            bank_df["Amount"] = bank_df["Withdrawal Amt"].fillna(0)
-
-        elif "Amount" not in bank_df.columns:
-            st.error("❌ Unable to detect amount column")
-            st.stop()
-
-        # Clean data
-        bank_df["Amount"] = bank_df["Amount"].abs()
-        bank_df = bank_df[bank_df["Amount"] > 0]
-
-        # Ensure required columns exist
-        if "Description" not in bank_df.columns:
-            st.error("❌ Description column missing")
-            st.stop()
-
-        if "Date" not in bank_df.columns:
-            st.error("❌ Date column missing")
-            st.stop()
-
-        # Categorize
         bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
 
         new_data = bank_df[["Date", "Category", "Amount"]]
@@ -82,8 +108,7 @@ if uploaded_file is not None:
         st.success("Bank data imported successfully ✅")
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
-
+        st.error(f"Error: {e}")
 
 # ---------------- ADD EXPENSE ----------------
 st.subheader("➕ Add Expense")
@@ -92,6 +117,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     category = st.selectbox("Category", ["Food", "Travel", "Shopping", "Bills", "Other"])
+
 with col2:
     amount = st.number_input("Amount (₹)", min_value=1)
 
@@ -104,18 +130,22 @@ if st.button("Add Expense"):
     save_data(df)
     st.success("Expense Added ✅")
 
-
-# ---------------- SHOW DATA ----------------
+# ---------------- DISPLAY DATA ----------------
 st.subheader("📊 Expense Data")
 st.write(df)
-
 
 # ---------------- ANALYSIS ----------------
 if not df.empty:
 
-    total = df["Amount"].sum()
-    st.subheader(f"💸 Total Spending: ₹{total}")
+    df["Date"] = pd.to_datetime(df["Date"])
 
+    total_expense = df["Amount"].sum()
+    avg_daily = round(total_expense / len(df["Date"].unique()), 2)
+
+    st.subheader(f"💸 Total Expense: ₹{total_expense}")
+    st.write(f"📊 Avg Daily Spend: ₹{avg_daily}")
+
+    # Category Graph
     category_sum = df.groupby("Category")["Amount"].sum()
 
     st.subheader("📈 Category Spending")
@@ -123,21 +153,41 @@ if not df.empty:
     category_sum.plot(kind="bar")
     st.pyplot(plt)
 
+    # Daily Trend
     st.subheader("📅 Daily Trend")
-    df["Date"] = pd.to_datetime(df["Date"])
     daily = df.groupby("Date")["Amount"].sum()
 
     plt.figure()
     daily.plot(marker='o')
     st.pyplot(plt)
 
-    avg_daily = round(total / len(daily), 2)
+    # Monthly
+    st.subheader("📆 Monthly Summary")
+    df["Month"] = df["Date"].dt.to_period("M")
+    monthly = df.groupby("Month")["Amount"].sum()
+
+    plt.figure()
+    monthly.plot(marker='o')
+    st.pyplot(plt)
+
+    # Income logic
+    total_income = salary
+    savings = total_income - total_expense
+
+    st.subheader("💼 Financial Summary")
+    st.write(f"Income: ₹{total_income}")
+    st.write(f"Savings: ₹{savings}")
+
+    if saving_goal > 0:
+        if savings >= saving_goal:
+            st.success("🎯 Goal Achieved!")
+        else:
+            st.warning("⚠️ Not meeting saving goal")
 
 else:
-    total = 0
-    avg_daily = 0
     category_sum = {}
-
+    total_expense = 0
+    avg_daily = 0
 
 # ---------------- CHAT ----------------
 st.subheader("💬 AI Financial Chat Advisor")
@@ -152,6 +202,10 @@ for msg in st.session_state.chat_history:
 user_input = st.chat_input("Ask about your finances...")
 
 if user_input:
+
+    if mode == "Strict 😈":
+        user_input = "Be strict. " + user_input
+
     st.session_state.chat_history.append({"role": "user", "content": user_input})
 
     with st.chat_message("user"):
@@ -162,7 +216,7 @@ if user_input:
     response = chat_with_advisor(
         st.session_state.chat_history,
         summary,
-        total,
+        total_expense,
         avg_daily
     )
 
