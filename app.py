@@ -41,24 +41,6 @@ def generate_pdf(total_expense, avg_daily, category_sum, savings):
     return file_path
 
 
-# ---------------- LOAD DATA ----------------
-df = load_data()
-
-# ---------------- SETTINGS ----------------
-st.subheader("⚙️ Personal Settings")
-
-colA, colB = st.columns(2)
-
-with colA:
-    salary = st.number_input("Monthly Salary (₹)", min_value=0)
-
-with colB:
-    saving_goal = st.number_input("Saving Goal (₹)", min_value=0)
-
-mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
-
-
-
 # ---------------- CATEGORY FUNCTION ----------------
 def categorize_expense(desc):
     desc = str(desc).lower()
@@ -77,13 +59,9 @@ def categorize_expense(desc):
         return "Other"
 
 
-
-
-
 # ---------------- BANK PROCESS FUNCTION ----------------
 def process_bank_data(bank_df):
 
-    # Clean column names
     bank_df.columns = [col.strip() for col in bank_df.columns]
 
     desc_col, withdraw_col, deposit_col = None, None, None
@@ -91,27 +69,21 @@ def process_bank_data(bank_df):
     for col in bank_df.columns:
         col_lower = col.lower()
 
-        # 🔥 improved detection
-        if any(keyword in col_lower for keyword in ["narration", "description", "remark", "details", "particular"]):
+        if any(k in col_lower for k in ["narration", "description", "remark", "details", "particular"]):
             desc_col = col
 
-        if any(keyword in col_lower for keyword in ["withdraw", "debit", "dr"]):
+        if any(k in col_lower for k in ["withdraw", "debit", "dr"]):
             withdraw_col = col
 
-        if any(keyword in col_lower for keyword in ["deposit", "credit", "cr"]):
+        if any(k in col_lower for k in ["deposit", "credit", "cr"]):
             deposit_col = col
 
-    # 🔍 DEBUG: show detected columns
-    st.write("Detected Columns:", bank_df.columns)
-
     if not desc_col:
-        st.error("❌ Could not detect Description column automatically.")
-        st.info("👉 Please check your file columns above.")
+        st.error("❌ Could not detect Description column.")
         st.stop()
 
     bank_df.rename(columns={desc_col: "Description"}, inplace=True)
 
-    # Amount handling
     if withdraw_col:
         bank_df["Amount"] = bank_df[withdraw_col].fillna(0)
     else:
@@ -119,11 +91,8 @@ def process_bank_data(bank_df):
         st.stop()
 
     bank_df["Amount"] = bank_df["Amount"].abs()
-
-    # Remove zero rows
     bank_df = bank_df[bank_df["Amount"] > 0]
 
-    # Date check
     if "Date" not in bank_df.columns:
         st.error("❌ Date column missing")
         st.stop()
@@ -131,6 +100,21 @@ def process_bank_data(bank_df):
     return bank_df
 
 
+# ---------------- LOAD DATA ----------------
+df = load_data()
+
+# ---------------- SETTINGS ----------------
+st.subheader("⚙️ Personal Settings")
+
+colA, colB = st.columns(2)
+
+with colA:
+    salary = st.number_input("Monthly Salary (₹)", min_value=0)
+
+with colB:
+    saving_goal = st.number_input("Saving Goal (₹)", min_value=0)
+
+mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 
 
 # ---------------- FILE UPLOAD ----------------
@@ -141,25 +125,18 @@ uploaded_file = st.file_uploader(
     type=["csv", "xlsx", "xls", "pdf"]
 )
 
-st.write("Columns in your file:", list(bank_df.columns))
-
 # ---------------- PROCESS FILE ----------------
 if uploaded_file is not None:
     try:
-
         file_name = uploaded_file.name.lower()
 
-        # ---------- HANDLE PDF ----------
         if file_name.endswith(".pdf"):
-            st.warning("⚠️ PDF parsing not supported yet.")
-            st.info("👉 Please download bank statement as Excel (.xls) from your bank.")
+            st.warning("⚠️ PDF not supported yet. Use Excel (.xls)")
             st.stop()
 
-        # ---------- HANDLE CSV ----------
         elif file_name.endswith(".csv"):
             bank_df = pd.read_csv(uploaded_file)
 
-        # ---------- HANDLE EXCEL ----------
         elif file_name.endswith(".xlsx") or file_name.endswith(".xls"):
             bank_df = pd.read_excel(uploaded_file)
 
@@ -167,9 +144,9 @@ if uploaded_file is not None:
             st.error("Unsupported file format")
             st.stop()
 
+        st.write("Columns in your file:", list(bank_df.columns))
         st.write("Preview:", bank_df.head())
 
-        # Process bank data
         bank_df = process_bank_data(bank_df)
 
         bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
@@ -183,6 +160,7 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
+
 
 # ---------------- ADD EXPENSE ----------------
 st.subheader("➕ Add Expense")
@@ -256,9 +234,8 @@ if not df.empty:
         else:
             st.warning("⚠️ Not meeting saving goal")
 
-    # ---------------- PDF DOWNLOAD ----------------
+    # ---------------- PDF ----------------
     if st.button("📄 Generate Financial Report"):
-
         pdf_file = generate_pdf(
             total_expense,
             avg_daily,
