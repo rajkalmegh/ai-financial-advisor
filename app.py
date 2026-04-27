@@ -77,6 +77,9 @@ def categorize_expense(desc):
         return "Other"
 
 
+
+
+
 # ---------------- BANK PROCESS FUNCTION ----------------
 def process_bank_data(bank_df):
 
@@ -137,6 +140,8 @@ uploaded_file = st.file_uploader(
     "Upload CSV, Excel or PDF",
     type=["csv", "xlsx", "xls", "pdf"]
 )
+
+st.write("Columns in your file:", list(bank_df.columns))
 
 # ---------------- PROCESS FILE ----------------
 if uploaded_file is not None:
