@@ -76,14 +76,12 @@ def process_bank_data(bank_df):
             break
 
     if not header_found:
-        st.warning("⚠️ Using fallback parsing")
+        st.warning("⚠️ Header not detected. Using fallback parsing")
         bank_df.columns = [f"col_{i}" for i in range(len(bank_df.columns))]
 
     bank_df.columns = [str(col).strip() for col in bank_df.columns]
 
-    date_col = None
-    desc_col = None
-    amount_col = None
+    date_col, desc_col, amount_col = None, None, None
 
     for col in bank_df.columns:
         col_lower = col.lower()
@@ -99,10 +97,8 @@ def process_bank_data(bank_df):
 
     if not date_col:
         date_col = cols[0]
-
     if not desc_col:
         desc_col = cols[1] if len(cols) > 1 else cols[0]
-
     if not amount_col:
         amount_col = cols[-1]
 
@@ -115,6 +111,7 @@ def process_bank_data(bank_df):
     }, inplace=True)
 
     bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0).abs()
+
     bank_df = bank_df[bank_df["Amount"] > 0]
 
     return bank_df
@@ -125,7 +122,7 @@ st.title("💰 AI Financial Advisor Agent")
 
 df = load_data()
 
-# -------- SETTINGS --------
+# -------- USER SETTINGS --------
 st.subheader("⚙️ Personal Settings")
 
 colA, colB = st.columns(2)
@@ -142,35 +139,52 @@ mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 # -------- FILE UPLOAD --------
 st.subheader("📂 Upload Bank Statement")
 
+st.info("""
+Upload CSV / Excel file.
+
+Supported:
+- Date
+- Description / Narration
+- Amount / Debit
+
+Works for most banks.
+""")
+
 uploaded_file = st.file_uploader(
-    "Upload CSV or Excel file",
+    "Upload file",
     type=["csv", "xlsx", "xls"]
 )
 
-# -------- PROCESS FILE --------
+# -------- PROCESS FILE WITH PREVIEW --------
 if uploaded_file is not None:
     try:
-        if uploaded_file.name.endswith(".csv"):
-            bank_df = pd.read_csv(uploaded_file)
-        else:
-            bank_df = pd.read_excel(uploaded_file)
+        with st.spinner("Processing bank file..."):
 
-        st.write("Raw Preview:")
-        st.dataframe(bank_df.head())
+            if uploaded_file.name.endswith(".csv"):
+                raw_df = pd.read_csv(uploaded_file)
+            else:
+                raw_df = pd.read_excel(uploaded_file)
 
-        bank_df = process_bank_data(bank_df)
+            st.subheader("📄 Raw Data Preview")
+            st.write(raw_df.head())
 
-        st.write("Processed Preview:")
-        st.dataframe(bank_df.head())
+            processed_df = process_bank_data(raw_df)
 
-        bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
+            if processed_df.empty:
+                st.error("❌ No valid transactions found")
+            else:
+                st.subheader("✅ Processed Data Preview")
+                st.write(processed_df.head())
 
-        new_data = bank_df[["Date", "Category", "Amount"]]
+                if st.button("✅ Confirm Import"):
+                    processed_df["Category"] = processed_df["Description"].apply(categorize_expense)
 
-        df = pd.concat([df, new_data], ignore_index=True)
-        save_data(df)
+                    new_data = processed_df[["Date", "Category", "Amount"]]
 
-        st.success("Bank data imported successfully ✅")
+                    df = pd.concat([df, new_data], ignore_index=True)
+                    save_data(df)
+
+                    st.success("🎉 Data Imported Successfully")
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
@@ -199,7 +213,7 @@ if st.button("Add Expense"):
 
 # -------- DISPLAY --------
 st.subheader("📊 Expense Data")
-st.dataframe(df)
+st.write(df)
 
 
 # -------- ANALYSIS --------
@@ -211,7 +225,7 @@ if not df.empty:
     avg_daily = round(total_expense / len(df["Date"].unique()), 2)
 
     st.subheader(f"💸 Total Expense: ₹{total_expense}")
-    st.write(f"Avg Daily Spend: ₹{avg_daily}")
+    st.write(f"📊 Avg Daily Spend: ₹{avg_daily}")
 
     category_sum = df.groupby("Category")["Amount"].sum()
 
@@ -224,26 +238,35 @@ if not df.empty:
     st.subheader("💼 Financial Summary")
     st.write(f"Savings: ₹{savings}")
 
-    # PDF
-    if PDF_AVAILABLE and st.button("📄 Generate Report"):
-        pdf_file = generate_pdf(
-            total_expense,
-            avg_daily,
-            category_sum.to_dict(),
-            savings
-        )
+    if saving_goal > 0:
+        if savings >= saving_goal:
+            st.success("🎯 Goal Achieved!")
+        else:
+            st.warning("⚠️ Not meeting saving goal")
 
-        with open(pdf_file, "rb") as f:
-            st.download_button(
-                label="Download PDF",
-                data=f,
-                file_name="report.pdf",
-                mime="application/pdf"
+    # -------- PDF --------
+    if PDF_AVAILABLE:
+        if st.button("📄 Generate Report"):
+            pdf_file = generate_pdf(
+                total_expense,
+                avg_daily,
+                category_sum.to_dict(),
+                savings
             )
+
+            with open(pdf_file, "rb") as f:
+                st.download_button(
+                    label="⬇️ Download PDF",
+                    data=f,
+                    file_name="financial_report.pdf",
+                    mime="application/pdf"
+                )
+    else:
+        st.warning("PDF feature not available")
 
 
 # -------- CHAT --------
-st.subheader("💬 AI Advisor")
+st.subheader("💬 AI Financial Advisor")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
