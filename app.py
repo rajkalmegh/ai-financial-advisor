@@ -61,8 +61,7 @@ mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 # ---------------- FILE UPLOAD ----------------
 st.subheader("📂 Upload Bank Statement")
 
-uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
-
+uploaded_file = st.file_uploader("Upload file", type=["csv", "xlsx", "xls", "pdf"])
 
 def categorize_expense(desc):
     desc = str(desc).lower()
