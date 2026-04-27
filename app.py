@@ -1,18 +1,22 @@
 import streamlit as st
+
+# MUST BE FIRST STREAMLIT COMMAND
+st.set_page_config(page_title="AI Financial Advisor", layout="wide")
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import date
 from storage import load_data, save_data
 from advisor import chat_with_advisor
 
-# PDF imports
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+# SAFE PDF IMPORT (prevents crash on Render)
+try:
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    PDF_AVAILABLE = True
+except:
+    PDF_AVAILABLE = False
 
-# MUST BE FIRST
-st.set_page_config(page_title="AI Financial Advisor", layout="wide")
-
-st.title("💰 AI Financial Advisor Agent")
 
 # ---------------- PDF FUNCTION ----------------
 def generate_pdf(total_expense, avg_daily, category_sum, savings):
@@ -22,7 +26,6 @@ def generate_pdf(total_expense, avg_daily, category_sum, savings):
     styles = getSampleStyleSheet()
 
     content = []
-
     content.append(Paragraph("AI Financial Advisor Report", styles["Title"]))
     content.append(Spacer(1, 10))
 
@@ -62,28 +65,19 @@ def categorize_expense(desc):
 # ---------------- BANK PROCESS FUNCTION ----------------
 def process_bank_data(bank_df):
 
-    # Remove completely empty rows
-    bank_df = bank_df.dropna(how="all")
+    bank_df = bank_df.dropna(how="all").reset_index(drop=True)
 
-    # Reset index
-    bank_df = bank_df.reset_index(drop=True)
-
-    # Try to find header row dynamically
-    for i in range(5):  # check first 5 rows
+    # Detect header row dynamically
+    for i in range(min(5, len(bank_df))):
         row = bank_df.iloc[i].astype(str).str.lower()
-
         if any("date" in cell for cell in row):
             bank_df.columns = bank_df.iloc[i]
             bank_df = bank_df[i+1:]
             break
 
-    # Clean column names
     bank_df.columns = [str(col).strip() for col in bank_df.columns]
-
-    # Remove unnamed columns
     bank_df = bank_df.loc[:, ~bank_df.columns.str.contains('^Unnamed')]
 
-    # Detect columns
     desc_col, withdraw_col, deposit_col, date_col = None, None, None, None
 
     for col in bank_df.columns:
@@ -98,45 +92,29 @@ def process_bank_data(bank_df):
         elif "date" in col_lower:
             date_col = col
 
-    # Debug print
-    st.write("Detected Columns:", bank_df.columns)
-
-    if not desc_col:
-        st.error("❌ Description column not found")
+    if not desc_col or not withdraw_col or not date_col:
+        st.error("❌ Unsupported bank format. Please check your file.")
         st.stop()
 
-    if not withdraw_col:
-        st.error("❌ Withdrawal column not found")
-        st.stop()
-
-    if not date_col:
-        st.error("❌ Date column not found")
-        st.stop()
-
-    # Rename
     bank_df.rename(columns={
         desc_col: "Description",
         date_col: "Date"
     }, inplace=True)
 
-    # Create Amount
     bank_df["Amount"] = bank_df[withdraw_col].fillna(0)
-
-    # Income
     bank_df["Income"] = bank_df[deposit_col].fillna(0) if deposit_col else 0
 
-    # Clean numbers
-    bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0)
-    bank_df["Income"] = pd.to_numeric(bank_df["Income"], errors='coerce').fillna(0)
+    bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0).abs()
+    bank_df["Income"] = pd.to_numeric(bank_df["Income"], errors='coerce').fillna(0).abs()
 
-    bank_df["Amount"] = bank_df["Amount"].abs()
-    bank_df["Income"] = bank_df["Income"].abs()
-
-    # Filter valid rows
     bank_df = bank_df[(bank_df["Amount"] > 0) | (bank_df["Income"] > 0)]
 
     return bank_df
-# ---------------- LOAD DATA ----------------
+
+
+# ---------------- APP UI ----------------
+st.title("💰 AI Financial Advisor Agent")
+
 df = load_data()
 
 # ---------------- SETTINGS ----------------
@@ -157,34 +135,20 @@ mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 st.subheader("📂 Upload Bank Statement")
 
 uploaded_file = st.file_uploader(
-    "Upload CSV, Excel or PDF",
-    type=["csv", "xlsx", "xls", "pdf"]
+    "Upload CSV or Excel file",
+    type=["csv", "xlsx", "xls"]
 )
 
-
-st.write(bank_df.head())
-
-
-# ---------------- PROCESS FILE ----------------
+# ---------------- FILE PROCESS ----------------
 if uploaded_file is not None:
     try:
         file_name = uploaded_file.name.lower()
 
-        if file_name.endswith(".pdf"):
-            st.warning("⚠️ PDF not supported yet. Use Excel (.xls)")
-            st.stop()
-
-        elif file_name.endswith(".csv"):
+        if file_name.endswith(".csv"):
             bank_df = pd.read_csv(uploaded_file)
-
-        elif file_name.endswith(".xlsx") or file_name.endswith(".xls"):
+        else:
             bank_df = pd.read_excel(uploaded_file)
 
-        else:
-            st.error("Unsupported file format")
-            st.stop()
-
-        st.write("Columns in your file:", list(bank_df.columns))
         st.write("Preview:", bank_df.head())
 
         bank_df = process_bank_data(bank_df)
@@ -261,11 +225,9 @@ if not df.empty:
     monthly.plot(marker='o')
     st.pyplot(plt)
 
-    total_income = salary
-    savings = total_income - total_expense
+    savings = salary - total_expense
 
     st.subheader("💼 Financial Summary")
-    st.write(f"Income: ₹{total_income}")
     st.write(f"Savings: ₹{savings}")
 
     if saving_goal > 0:
@@ -275,7 +237,8 @@ if not df.empty:
             st.warning("⚠️ Not meeting saving goal")
 
     # ---------------- PDF ----------------
-    if st.button("📄 Generate Financial Report"):
+    if PDF_AVAILABLE and st.button("📄 Generate Financial Report"):
+
         pdf_file = generate_pdf(
             total_expense,
             avg_daily,
@@ -290,6 +253,9 @@ if not df.empty:
                 file_name="financial_report.pdf",
                 mime="application/pdf"
             )
+
+    elif not PDF_AVAILABLE:
+        st.warning("PDF feature not available in this environment")
 
 else:
     category_sum = {}
