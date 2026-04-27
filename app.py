@@ -1,6 +1,6 @@
 import streamlit as st
 
-# MUST BE FIRST STREAMLIT COMMAND
+# MUST BE FIRST
 st.set_page_config(page_title="AI Financial Advisor", layout="wide")
 
 import pandas as pd
@@ -9,7 +9,7 @@ from datetime import date
 from storage import load_data, save_data
 from advisor import chat_with_advisor
 
-# SAFE PDF IMPORT (prevents crash on Render)
+# -------- SAFE PDF IMPORT --------
 try:
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
@@ -18,33 +18,29 @@ except:
     PDF_AVAILABLE = False
 
 
-# ---------------- PDF FUNCTION ----------------
+# -------- PDF FUNCTION --------
 def generate_pdf(total_expense, avg_daily, category_sum, savings):
     file_path = "financial_report.pdf"
-
     doc = SimpleDocTemplate(file_path)
     styles = getSampleStyleSheet()
 
     content = []
     content.append(Paragraph("AI Financial Advisor Report", styles["Title"]))
     content.append(Spacer(1, 10))
-
     content.append(Paragraph(f"Total Expense: ₹{total_expense}", styles["Normal"]))
-    content.append(Paragraph(f"Average Daily Spend: ₹{avg_daily}", styles["Normal"]))
+    content.append(Paragraph(f"Avg Daily Spend: ₹{avg_daily}", styles["Normal"]))
     content.append(Paragraph(f"Savings: ₹{savings}", styles["Normal"]))
     content.append(Spacer(1, 10))
 
     content.append(Paragraph("Category Breakdown:", styles["Heading2"]))
-
-    for category, amount in category_sum.items():
-        content.append(Paragraph(f"{category}: ₹{amount}", styles["Normal"]))
+    for cat, amt in category_sum.items():
+        content.append(Paragraph(f"{cat}: ₹{amt}", styles["Normal"]))
 
     doc.build(content)
-
     return file_path
 
 
-# ---------------- CATEGORY FUNCTION ----------------
+# -------- CATEGORY FUNCTION --------
 def categorize_expense(desc):
     desc = str(desc).lower()
 
@@ -62,16 +58,12 @@ def categorize_expense(desc):
         return "Other"
 
 
-# ---------------- BANK PROCESS FUNCTION ----------------
+# -------- UNIVERSAL BANK PROCESSOR --------
 def process_bank_data(bank_df):
 
-    # Remove empty rows
     bank_df = bank_df.dropna(how="all").reset_index(drop=True)
-
-    # Convert everything to string
     bank_df = bank_df.fillna("").astype(str)
 
-    # -------- STEP 1: Detect Header Row --------
     header_found = False
 
     for i in range(min(10, len(bank_df))):
@@ -83,19 +75,14 @@ def process_bank_data(bank_df):
             header_found = True
             break
 
-    # -------- STEP 2: If header not found --------
     if not header_found:
-        st.warning("⚠️ Header not detected. Using generic parsing")
+        st.warning("⚠️ Using fallback parsing")
         bank_df.columns = [f"col_{i}" for i in range(len(bank_df.columns))]
 
-    # Clean column names
     bank_df.columns = [str(col).strip() for col in bank_df.columns]
 
-    # -------- STEP 3: Smart Column Guess --------
     date_col = None
     desc_col = None
-    debit_col = None
-    credit_col = None
     amount_col = None
 
     for col in bank_df.columns:
@@ -103,16 +90,11 @@ def process_bank_data(bank_df):
 
         if "date" in col_lower:
             date_col = col
-        elif "narration" in col_lower or "description" in col_lower or "details" in col_lower:
+        elif "narration" in col_lower or "description" in col_lower:
             desc_col = col
-        elif "withdraw" in col_lower or "debit" in col_lower:
-            debit_col = col
-        elif "deposit" in col_lower or "credit" in col_lower:
-            credit_col = col
-        elif "amount" in col_lower:
+        elif "amount" in col_lower or "withdraw" in col_lower or "debit" in col_lower:
             amount_col = col
 
-    # -------- STEP 4: Fallback --------
     cols = bank_df.columns.tolist()
 
     if not date_col:
@@ -121,36 +103,29 @@ def process_bank_data(bank_df):
     if not desc_col:
         desc_col = cols[1] if len(cols) > 1 else cols[0]
 
-    if debit_col:
-        amount_series = bank_df[debit_col]
-    elif amount_col:
-        amount_series = bank_df[amount_col]
-    else:
-        amount_series = bank_df[cols[-1]]
+    if not amount_col:
+        amount_col = cols[-1]
 
-    # -------- STEP 5: Rename --------
+    st.info(f"Using → Date: {date_col}, Desc: {desc_col}, Amount: {amount_col}")
+
     bank_df.rename(columns={
         date_col: "Date",
-        desc_col: "Description"
+        desc_col: "Description",
+        amount_col: "Amount"
     }, inplace=True)
 
-    bank_df["Amount"] = pd.to_numeric(amount_series, errors='coerce').fillna(0).abs()
-
-    # -------- STEP 6: Filter --------
+    bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0).abs()
     bank_df = bank_df[bank_df["Amount"] > 0]
-
-    # -------- DEBUG --------
-    st.info(f"Detected → Date: {date_col}, Desc: {desc_col}")
 
     return bank_df
 
 
-# ---------------- APP UI ----------------
+# -------- UI --------
 st.title("💰 AI Financial Advisor Agent")
 
 df = load_data()
 
-# ---------------- SETTINGS ----------------
+# -------- SETTINGS --------
 st.subheader("⚙️ Personal Settings")
 
 colA, colB = st.columns(2)
@@ -164,7 +139,7 @@ with colB:
 mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 
 
-# ---------------- FILE UPLOAD ----------------
+# -------- FILE UPLOAD --------
 st.subheader("📂 Upload Bank Statement")
 
 uploaded_file = st.file_uploader(
@@ -172,19 +147,21 @@ uploaded_file = st.file_uploader(
     type=["csv", "xlsx", "xls"]
 )
 
-# ---------------- FILE PROCESS ----------------
+# -------- PROCESS FILE --------
 if uploaded_file is not None:
     try:
-        file_name = uploaded_file.name.lower()
-
-        if file_name.endswith(".csv"):
+        if uploaded_file.name.endswith(".csv"):
             bank_df = pd.read_csv(uploaded_file)
         else:
             bank_df = pd.read_excel(uploaded_file)
 
-        st.write("Preview:", bank_df.head())
+        st.write("Raw Preview:")
+        st.dataframe(bank_df.head())
 
         bank_df = process_bank_data(bank_df)
+
+        st.write("Processed Preview:")
+        st.dataframe(bank_df.head())
 
         bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
 
@@ -198,10 +175,8 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error processing file: {e}")
 
-st.write("Processed Data:", bank_df.head())
 
-
-# ---------------- ADD EXPENSE ----------------
+# -------- ADD EXPENSE --------
 st.subheader("➕ Add Expense")
 
 col1, col2 = st.columns(2)
@@ -222,12 +197,12 @@ if st.button("Add Expense"):
     st.success("Expense Added ✅")
 
 
-# ---------------- DISPLAY ----------------
+# -------- DISPLAY --------
 st.subheader("📊 Expense Data")
-st.write(df)
+st.dataframe(df)
 
 
-# ---------------- ANALYSIS ----------------
+# -------- ANALYSIS --------
 if not df.empty:
 
     df["Date"] = pd.to_datetime(df["Date"])
@@ -236,28 +211,12 @@ if not df.empty:
     avg_daily = round(total_expense / len(df["Date"].unique()), 2)
 
     st.subheader(f"💸 Total Expense: ₹{total_expense}")
-    st.write(f"📊 Avg Daily Spend: ₹{avg_daily}")
+    st.write(f"Avg Daily Spend: ₹{avg_daily}")
 
     category_sum = df.groupby("Category")["Amount"].sum()
 
-    st.subheader("📈 Category Spending")
     plt.figure()
     category_sum.plot(kind="bar")
-    st.pyplot(plt)
-
-    st.subheader("📅 Daily Trend")
-    daily = df.groupby("Date")["Amount"].sum()
-
-    plt.figure()
-    daily.plot(marker='o')
-    st.pyplot(plt)
-
-    st.subheader("📆 Monthly Summary")
-    df["Month"] = df["Date"].dt.to_period("M")
-    monthly = df.groupby("Month")["Amount"].sum()
-
-    plt.figure()
-    monthly.plot(marker='o')
     st.pyplot(plt)
 
     savings = salary - total_expense
@@ -265,15 +224,8 @@ if not df.empty:
     st.subheader("💼 Financial Summary")
     st.write(f"Savings: ₹{savings}")
 
-    if saving_goal > 0:
-        if savings >= saving_goal:
-            st.success("🎯 Goal Achieved!")
-        else:
-            st.warning("⚠️ Not meeting saving goal")
-
-    # ---------------- PDF ----------------
-    if PDF_AVAILABLE and st.button("📄 Generate Financial Report"):
-
+    # PDF
+    if PDF_AVAILABLE and st.button("📄 Generate Report"):
         pdf_file = generate_pdf(
             total_expense,
             avg_daily,
@@ -283,23 +235,15 @@ if not df.empty:
 
         with open(pdf_file, "rb") as f:
             st.download_button(
-                label="⬇️ Download PDF",
+                label="Download PDF",
                 data=f,
-                file_name="financial_report.pdf",
+                file_name="report.pdf",
                 mime="application/pdf"
             )
 
-    elif not PDF_AVAILABLE:
-        st.warning("PDF feature not available in this environment")
 
-else:
-    category_sum = {}
-    total_expense = 0
-    avg_daily = 0
-
-
-# ---------------- CHAT ----------------
-st.subheader("💬 AI Financial Chat Advisor")
+# -------- CHAT --------
+st.subheader("💬 AI Advisor")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -325,8 +269,8 @@ if user_input:
     response = chat_with_advisor(
         st.session_state.chat_history,
         summary,
-        total_expense,
-        avg_daily
+        total_expense if not df.empty else 0,
+        avg_daily if not df.empty else 0
     )
 
     st.session_state.chat_history.append({"role": "assistant", "content": response})
