@@ -69,18 +69,37 @@ def process_bank_data(bank_df):
     for col in bank_df.columns:
         col_lower = col.lower()
 
-        if any(k in col_lower for k in ["narration", "description", "remark", "details", "particular"]):
+        # 🔥 VERY FLEXIBLE DESCRIPTION DETECTION
+        if any(k in col_lower for k in [
+            "narration", "description", "remark", "details",
+            "particular", "info", "transaction", "txn"
+        ]):
             desc_col = col
 
-        if any(k in col_lower for k in ["withdraw", "debit", "dr"]):
+        # Withdraw detection
+        if any(k in col_lower for k in [
+            "withdraw", "debit", "dr", "withdrawal"
+        ]):
             withdraw_col = col
 
-        if any(k in col_lower for k in ["deposit", "credit", "cr"]):
+        # Deposit detection
+        if any(k in col_lower for k in [
+            "deposit", "credit", "cr"
+        ]):
             deposit_col = col
 
+    # 🔍 DEBUG OUTPUT (IMPORTANT)
+    st.write("Detected Columns:", list(bank_df.columns))
+    st.write("Detected Description Column:", desc_col)
+    st.write("Detected Withdraw Column:", withdraw_col)
+
+    # ❌ HARD FAIL → fallback option
     if not desc_col:
-        st.error("❌ Could not detect Description column.")
-        st.stop()
+        st.warning("⚠️ Could not auto-detect description column.")
+
+        # 👉 fallback: use second column
+        desc_col = bank_df.columns[1]
+        st.info(f"Using fallback column: {desc_col}")
 
     bank_df.rename(columns={desc_col: "Description"}, inplace=True)
 
@@ -93,14 +112,12 @@ def process_bank_data(bank_df):
     bank_df["Amount"] = bank_df["Amount"].abs()
     bank_df = bank_df[bank_df["Amount"] > 0]
 
+    # Fix date column (important)
     if "Date" not in bank_df.columns:
-        st.error("❌ Date column missing")
-        st.stop()
+        # fallback to first column
+        bank_df.rename(columns={bank_df.columns[0]: "Date"}, inplace=True)
 
-    return bank_df
-
-
-# ---------------- LOAD DATA ----------------
+    return bank_df# ---------------- LOAD DATA ----------------
 df = load_data()
 
 # ---------------- SETTINGS ----------------
