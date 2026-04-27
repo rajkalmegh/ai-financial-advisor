@@ -5,22 +5,85 @@ from datetime import date
 from storage import load_data, save_data
 from advisor import chat_with_advisor
 
-st.subheader("📂 Upload Bank Statement (CSV)")
-
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
-
-st.set_page_config(page_title="AI Financial Advisor", layout="centered")
+# MUST BE FIRST
+st.set_page_config(page_title="AI Financial Advisor", layout="wide")
 
 st.title("💰 AI Financial Advisor Agent")
 
-# Load data
+# ---------------- LOAD DATA ----------------
 df = load_data()
 
-if uploaded_file is not None:
-    bank_df = pd.read_csv(uploaded_file)
+# ---------------- FILE UPLOAD ----------------
+st.subheader("📂 Upload Bank Statement")
 
-    st.write("Preview of Uploaded Data:")
-    st.dataframe(bank_df)
+uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx", "xls"])
+
+
+# ---------------- CATEGORY LOGIC ----------------
+def categorize_expense(description):
+    description = str(description).lower()
+
+    if "swiggy" in description or "zomato" in description:
+        return "Food"
+    elif "uber" in description or "ola" in description or "fuel" in description:
+        return "Travel"
+    elif "amazon" in description or "flipkart" in description:
+        return "Shopping"
+    elif "electricity" in description or "bill" in description:
+        return "Bills"
+    else:
+        return "Other"
+
+
+# ---------------- FILE PROCESSING ----------------
+if uploaded_file is not None:
+    try:
+        # Detect file type
+        if uploaded_file.name.endswith(".csv"):
+            bank_df = pd.read_csv(uploaded_file)
+        else:
+            bank_df = pd.read_excel(uploaded_file)
+
+        st.write("Preview of Uploaded Data:")
+        st.write(bank_df.head())
+
+        # -------- HANDLE HDFC FORMAT --------
+        if "Narration" in bank_df.columns:
+            bank_df.rename(columns={"Narration": "Description"}, inplace=True)
+
+        if "Withdrawal Amt" in bank_df.columns:
+            bank_df["Amount"] = bank_df["Withdrawal Amt"].fillna(0)
+
+        elif "Amount" not in bank_df.columns:
+            st.error("❌ Unable to detect amount column")
+            st.stop()
+
+        # Clean data
+        bank_df["Amount"] = bank_df["Amount"].abs()
+        bank_df = bank_df[bank_df["Amount"] > 0]
+
+        # Ensure required columns exist
+        if "Description" not in bank_df.columns:
+            st.error("❌ Description column missing")
+            st.stop()
+
+        if "Date" not in bank_df.columns:
+            st.error("❌ Date column missing")
+            st.stop()
+
+        # Categorize
+        bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
+
+        new_data = bank_df[["Date", "Category", "Amount"]]
+
+        df = pd.concat([df, new_data], ignore_index=True)
+        save_data(df)
+
+        st.success("Bank data imported successfully ✅")
+
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
+
 
 # ---------------- ADD EXPENSE ----------------
 st.subheader("➕ Add Expense")
@@ -42,36 +105,10 @@ if st.button("Add Expense"):
     st.success("Expense Added ✅")
 
 
-
-def categorize_expense(description):
-    description = str(description).lower()
-
-    if "swiggy" in description or "zomato" in description or "food" in description:
-        return "Food"
-    elif "uber" in description or "ola" in description or "fuel" in description:
-        return "Travel"
-    elif "amazon" in description or "flipkart" in description:
-        return "Shopping"
-    elif "electricity" in description or "bill" in description:
-        return "Bills"
-    else:
-        return "Other"
-    
-
-if uploaded_file is not None:
-
-    bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
-
-    new_data = bank_df[["Date", "Category", "Amount"]]
-
-    df = pd.concat([df, new_data], ignore_index=True)
-    save_data(df)
-
-    st.success("Bank data imported successfully ✅")
-
 # ---------------- SHOW DATA ----------------
 st.subheader("📊 Expense Data")
-st.dataframe(df)
+st.write(df)
+
 
 # ---------------- ANALYSIS ----------------
 if not df.empty:
@@ -79,7 +116,6 @@ if not df.empty:
     total = df["Amount"].sum()
     st.subheader(f"💸 Total Spending: ₹{total}")
 
-    # Category Graph
     category_sum = df.groupby("Category")["Amount"].sum()
 
     st.subheader("📈 Category Spending")
@@ -87,7 +123,6 @@ if not df.empty:
     category_sum.plot(kind="bar")
     st.pyplot(plt)
 
-    # Daily Trend
     st.subheader("📅 Daily Trend")
     df["Date"] = pd.to_datetime(df["Date"])
     daily = df.groupby("Date")["Amount"].sum()
@@ -103,18 +138,17 @@ else:
     avg_daily = 0
     category_sum = {}
 
+
 # ---------------- CHAT ----------------
 st.subheader("💬 AI Financial Chat Advisor")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Show chat
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# Input
 user_input = st.chat_input("Ask about your finances...")
 
 if user_input:
