@@ -57,6 +57,65 @@ with colB:
 
 mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 
+
+
+# ---------------- CATEGORY FUNCTION ----------------
+def categorize_expense(desc):
+    desc = str(desc).lower()
+
+    if "swiggy" in desc or "zomato" in desc:
+        return "Food"
+    elif "uber" in desc or "ola" in desc or "fuel" in desc:
+        return "Travel"
+    elif "amazon" in desc or "flipkart" in desc:
+        return "Shopping"
+    elif "bill" in desc or "electricity" in desc:
+        return "Bills"
+    elif "salary" in desc:
+        return "Income"
+    else:
+        return "Other"
+
+
+# ---------------- BANK PROCESS FUNCTION ----------------
+def process_bank_data(bank_df):
+
+    # Clean column names
+    bank_df.columns = [col.strip() for col in bank_df.columns]
+
+    desc_col, withdraw_col, deposit_col = None, None, None
+
+    for col in bank_df.columns:
+        if "narration" in col.lower() or "description" in col.lower():
+            desc_col = col
+        if "withdraw" in col.lower() or "debit" in col.lower():
+            withdraw_col = col
+        if "deposit" in col.lower() or "credit" in col.lower():
+            deposit_col = col
+
+    if not desc_col:
+        st.error("❌ Description column not found")
+        st.stop()
+
+    bank_df.rename(columns={desc_col: "Description"}, inplace=True)
+
+    # Create Amount column
+    bank_df["Amount"] = bank_df[withdraw_col].fillna(0) if withdraw_col else 0
+    bank_df["Amount"] = bank_df["Amount"].abs()
+
+    # Remove zero rows
+    bank_df = bank_df[bank_df["Amount"] > 0]
+
+    # Ensure Date column
+    if "Date" not in bank_df.columns:
+        st.error("❌ Date column missing")
+        st.stop()
+
+    return bank_df
+
+
+
+
 # ---------------- FILE UPLOAD ----------------
 st.subheader("📂 Upload Bank Statement")
 
