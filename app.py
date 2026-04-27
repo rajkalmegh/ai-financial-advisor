@@ -86,27 +86,41 @@ def process_bank_data(bank_df):
     desc_col, withdraw_col, deposit_col = None, None, None
 
     for col in bank_df.columns:
-        if "narration" in col.lower() or "description" in col.lower():
+        col_lower = col.lower()
+
+        # 🔥 improved detection
+        if any(keyword in col_lower for keyword in ["narration", "description", "remark", "details", "particular"]):
             desc_col = col
-        if "withdraw" in col.lower() or "debit" in col.lower():
+
+        if any(keyword in col_lower for keyword in ["withdraw", "debit", "dr"]):
             withdraw_col = col
-        if "deposit" in col.lower() or "credit" in col.lower():
+
+        if any(keyword in col_lower for keyword in ["deposit", "credit", "cr"]):
             deposit_col = col
 
+    # 🔍 DEBUG: show detected columns
+    st.write("Detected Columns:", bank_df.columns)
+
     if not desc_col:
-        st.error("❌ Description column not found")
+        st.error("❌ Could not detect Description column automatically.")
+        st.info("👉 Please check your file columns above.")
         st.stop()
 
     bank_df.rename(columns={desc_col: "Description"}, inplace=True)
 
-    # Create Amount column
-    bank_df["Amount"] = bank_df[withdraw_col].fillna(0) if withdraw_col else 0
+    # Amount handling
+    if withdraw_col:
+        bank_df["Amount"] = bank_df[withdraw_col].fillna(0)
+    else:
+        st.error("❌ Could not detect withdrawal column.")
+        st.stop()
+
     bank_df["Amount"] = bank_df["Amount"].abs()
 
     # Remove zero rows
     bank_df = bank_df[bank_df["Amount"] > 0]
 
-    # Ensure Date column
+    # Date check
     if "Date" not in bank_df.columns:
         st.error("❌ Date column missing")
         st.stop()
