@@ -40,7 +40,7 @@ def generate_pdf(total_expense, avg_daily, category_sum, savings):
     return file_path
 
 
-# -------- CATEGORY FUNCTION --------
+# -------- CATEGORY --------
 def categorize_expense(desc):
     desc = str(desc).lower()
 
@@ -52,69 +52,21 @@ def categorize_expense(desc):
         return "Shopping"
     elif "bill" in desc or "electricity" in desc:
         return "Bills"
-    elif "salary" in desc:
-        return "Income"
     else:
         return "Other"
 
 
-# -------- UNIVERSAL BANK PROCESSOR --------
-def process_bank_data(bank_df):
-
-    bank_df = bank_df.dropna(how="all").reset_index(drop=True)
-    bank_df = bank_df.fillna("").astype(str)
-
-    header_found = False
-
-    for i in range(min(10, len(bank_df))):
-        row = bank_df.iloc[i].apply(lambda x: str(x).lower())
-
-        if any("date" in cell for cell in row):
-            bank_df.columns = bank_df.iloc[i]
-            bank_df = bank_df[i+1:]
-            header_found = True
-            break
-
-    if not header_found:
-        st.warning("⚠️ Header not detected. Using fallback parsing")
-        bank_df.columns = [f"col_{i}" for i in range(len(bank_df.columns))]
-
-    bank_df.columns = [str(col).strip() for col in bank_df.columns]
-
-    date_col, desc_col, amount_col = None, None, None
-
-    for col in bank_df.columns:
-        col_lower = col.lower()
-
-        if "date" in col_lower:
-            date_col = col
-        elif "narration" in col_lower or "description" in col_lower:
-            desc_col = col
-        elif "amount" in col_lower or "withdraw" in col_lower or "debit" in col_lower:
-            amount_col = col
-
-    cols = bank_df.columns.tolist()
-
-    if not date_col:
-        date_col = cols[0]
-    if not desc_col:
-        desc_col = cols[1] if len(cols) > 1 else cols[0]
-    if not amount_col:
-        amount_col = cols[-1]
-
-    st.info(f"Using → Date: {date_col}, Desc: {desc_col}, Amount: {amount_col}")
-
-    bank_df.rename(columns={
-        date_col: "Date",
-        desc_col: "Description",
-        amount_col: "Amount"
-    }, inplace=True)
-
-    bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0).abs()
-
-    bank_df = bank_df[bank_df["Amount"] > 0]
-
-    return bank_df
+# -------- AMOUNT CLEANER --------
+def clean_amount(series):
+    series = (
+        series.astype(str)
+        .str.replace(",", "")
+        .str.replace("₹", "")
+        .str.replace("CR", "")
+        .str.replace("DR", "")
+        .str.strip()
+    )
+    return pd.to_numeric(series, errors='coerce').fillna(0).abs()
 
 
 # -------- UI --------
@@ -122,7 +74,7 @@ st.title("💰 AI Financial Advisor Agent")
 
 df = load_data()
 
-# -------- USER SETTINGS --------
+# -------- SETTINGS --------
 st.subheader("⚙️ Personal Settings")
 
 colA, colB = st.columns(2)
@@ -139,52 +91,53 @@ mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 # -------- FILE UPLOAD --------
 st.subheader("📂 Upload Bank Statement")
 
-st.info("""
-Upload CSV / Excel file.
-
-Supported:
-- Date
-- Description / Narration
-- Amount / Debit
-
-Works for most banks.
-""")
+st.info("Upload CSV or Excel file. You can manually map columns if needed.")
 
 uploaded_file = st.file_uploader(
     "Upload file",
     type=["csv", "xlsx", "xls"]
 )
 
-# -------- PROCESS FILE WITH PREVIEW --------
 if uploaded_file is not None:
     try:
-        with st.spinner("Processing bank file..."):
+        if uploaded_file.name.endswith(".csv"):
+            raw_df = pd.read_csv(uploaded_file)
+        else:
+            raw_df = pd.read_excel(uploaded_file)
 
-            if uploaded_file.name.endswith(".csv"):
-                raw_df = pd.read_csv(uploaded_file)
-            else:
-                raw_df = pd.read_excel(uploaded_file)
+        st.subheader("📄 Raw Data Preview")
+        st.dataframe(raw_df.head())
 
-            st.subheader("📄 Raw Data Preview")
-            st.write(raw_df.head())
+        # -------- COLUMN SELECTION UI --------
+        st.subheader("🛠 Map Your Columns")
 
-            processed_df = process_bank_data(raw_df)
+        columns = raw_df.columns.tolist()
 
-            if processed_df.empty:
-                st.error("❌ No valid transactions found")
-            else:
-                st.subheader("✅ Processed Data Preview")
-                st.write(processed_df.head())
+        date_col = st.selectbox("Select Date Column", columns)
+        desc_col = st.selectbox("Select Description Column", columns)
+        amount_col = st.selectbox("Select Amount Column", columns)
 
-                if st.button("✅ Confirm Import"):
-                    processed_df["Category"] = processed_df["Description"].apply(categorize_expense)
+        processed_df = raw_df.rename(columns={
+            date_col: "Date",
+            desc_col: "Description",
+            amount_col: "Amount"
+        })
 
-                    new_data = processed_df[["Date", "Category", "Amount"]]
+        processed_df["Amount"] = clean_amount(processed_df["Amount"])
 
-                    df = pd.concat([df, new_data], ignore_index=True)
-                    save_data(df)
+        st.subheader("✅ Processed Data Preview")
+        st.dataframe(processed_df.head())
 
-                    st.success("🎉 Data Imported Successfully")
+        if st.button("✅ Confirm Import"):
+
+            processed_df["Category"] = processed_df["Description"].apply(categorize_expense)
+
+            new_data = processed_df[["Date", "Category", "Amount"]]
+
+            df = pd.concat([df, new_data], ignore_index=True)
+            save_data(df)
+
+            st.success("🎉 Data Imported Successfully")
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
@@ -244,25 +197,22 @@ if not df.empty:
         else:
             st.warning("⚠️ Not meeting saving goal")
 
-    # -------- PDF --------
-    if PDF_AVAILABLE:
-        if st.button("📄 Generate Report"):
-            pdf_file = generate_pdf(
-                total_expense,
-                avg_daily,
-                category_sum.to_dict(),
-                savings
-            )
+    # PDF
+    if PDF_AVAILABLE and st.button("📄 Generate Report"):
+        pdf_file = generate_pdf(
+            total_expense,
+            avg_daily,
+            category_sum.to_dict(),
+            savings
+        )
 
-            with open(pdf_file, "rb") as f:
-                st.download_button(
-                    label="⬇️ Download PDF",
-                    data=f,
-                    file_name="financial_report.pdf",
-                    mime="application/pdf"
-                )
-    else:
-        st.warning("PDF feature not available")
+        with open(pdf_file, "rb") as f:
+            st.download_button(
+                label="⬇️ Download PDF",
+                data=f,
+                file_name="financial_report.pdf",
+                mime="application/pdf"
+            )
 
 
 # -------- CHAT --------
