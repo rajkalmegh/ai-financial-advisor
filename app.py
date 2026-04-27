@@ -62,62 +62,81 @@ def categorize_expense(desc):
 # ---------------- BANK PROCESS FUNCTION ----------------
 def process_bank_data(bank_df):
 
-    bank_df.columns = [col.strip() for col in bank_df.columns]
+    # Remove completely empty rows
+    bank_df = bank_df.dropna(how="all")
 
-    desc_col, withdraw_col, deposit_col = None, None, None
+    # Reset index
+    bank_df = bank_df.reset_index(drop=True)
+
+    # Try to find header row dynamically
+    for i in range(5):  # check first 5 rows
+        row = bank_df.iloc[i].astype(str).str.lower()
+
+        if any("date" in cell for cell in row):
+            bank_df.columns = bank_df.iloc[i]
+            bank_df = bank_df[i+1:]
+            break
+
+    # Clean column names
+    bank_df.columns = [str(col).strip() for col in bank_df.columns]
+
+    # Remove unnamed columns
+    bank_df = bank_df.loc[:, ~bank_df.columns.str.contains('^Unnamed')]
+
+    # Detect columns
+    desc_col, withdraw_col, deposit_col, date_col = None, None, None, None
 
     for col in bank_df.columns:
         col_lower = col.lower()
 
-        # 🔥 VERY FLEXIBLE DESCRIPTION DETECTION
-        if any(k in col_lower for k in [
-            "narration", "description", "remark", "details",
-            "particular", "info", "transaction", "txn"
-        ]):
+        if "narration" in col_lower or "description" in col_lower:
             desc_col = col
-
-        # Withdraw detection
-        if any(k in col_lower for k in [
-            "withdraw", "debit", "dr", "withdrawal"
-        ]):
+        elif "withdraw" in col_lower or "debit" in col_lower:
             withdraw_col = col
-
-        # Deposit detection
-        if any(k in col_lower for k in [
-            "deposit", "credit", "cr"
-        ]):
+        elif "deposit" in col_lower or "credit" in col_lower:
             deposit_col = col
+        elif "date" in col_lower:
+            date_col = col
 
-    # 🔍 DEBUG OUTPUT (IMPORTANT)
-    st.write("Detected Columns:", list(bank_df.columns))
-    st.write("Detected Description Column:", desc_col)
-    st.write("Detected Withdraw Column:", withdraw_col)
+    # Debug print
+    st.write("Detected Columns:", bank_df.columns)
 
-    # ❌ HARD FAIL → fallback option
     if not desc_col:
-        st.warning("⚠️ Could not auto-detect description column.")
-
-        # 👉 fallback: use second column
-        desc_col = bank_df.columns[1]
-        st.info(f"Using fallback column: {desc_col}")
-
-    bank_df.rename(columns={desc_col: "Description"}, inplace=True)
-
-    if withdraw_col:
-        bank_df["Amount"] = bank_df[withdraw_col].fillna(0)
-    else:
-        st.error("❌ Could not detect withdrawal column.")
+        st.error("❌ Description column not found")
         st.stop()
 
+    if not withdraw_col:
+        st.error("❌ Withdrawal column not found")
+        st.stop()
+
+    if not date_col:
+        st.error("❌ Date column not found")
+        st.stop()
+
+    # Rename
+    bank_df.rename(columns={
+        desc_col: "Description",
+        date_col: "Date"
+    }, inplace=True)
+
+    # Create Amount
+    bank_df["Amount"] = bank_df[withdraw_col].fillna(0)
+
+    # Income
+    bank_df["Income"] = bank_df[deposit_col].fillna(0) if deposit_col else 0
+
+    # Clean numbers
+    bank_df["Amount"] = pd.to_numeric(bank_df["Amount"], errors='coerce').fillna(0)
+    bank_df["Income"] = pd.to_numeric(bank_df["Income"], errors='coerce').fillna(0)
+
     bank_df["Amount"] = bank_df["Amount"].abs()
-    bank_df = bank_df[bank_df["Amount"] > 0]
+    bank_df["Income"] = bank_df["Income"].abs()
 
-    # Fix date column (important)
-    if "Date" not in bank_df.columns:
-        # fallback to first column
-        bank_df.rename(columns={bank_df.columns[0]: "Date"}, inplace=True)
+    # Filter valid rows
+    bank_df = bank_df[(bank_df["Amount"] > 0) | (bank_df["Income"] > 0)]
 
-    return bank_df# ---------------- LOAD DATA ----------------
+    return bank_df
+# ---------------- LOAD DATA ----------------
 df = load_data()
 
 # ---------------- SETTINGS ----------------
@@ -141,6 +160,10 @@ uploaded_file = st.file_uploader(
     "Upload CSV, Excel or PDF",
     type=["csv", "xlsx", "xls", "pdf"]
 )
+
+
+st.write(bank_df.head())
+
 
 # ---------------- PROCESS FILE ----------------
 if uploaded_file is not None:
