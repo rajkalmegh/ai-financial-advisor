@@ -57,74 +57,41 @@ with colB:
 
 mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 
-
 # ---------------- FILE UPLOAD ----------------
 st.subheader("📂 Upload Bank Statement")
 
-uploaded_file = st.file_uploader("Upload file", type=["csv", "xlsx", "xls", "pdf"])
-
-def categorize_expense(desc):
-    desc = str(desc).lower()
-
-    if "swiggy" in desc or "zomato" in desc:
-        return "Food"
-    elif "uber" in desc or "ola" in desc or "fuel" in desc:
-        return "Travel"
-    elif "amazon" in desc or "flipkart" in desc:
-        return "Shopping"
-    elif "bill" in desc or "electricity" in desc:
-        return "Bills"
-    elif "salary" in desc:
-        return "Income"
-    else:
-        return "Other"
-
-
-def process_bank_data(bank_df):
-
-    bank_df.columns = [col.strip() for col in bank_df.columns]
-
-    desc_col, withdraw_col, deposit_col = None, None, None
-
-    for col in bank_df.columns:
-        if "narration" in col.lower() or "description" in col.lower():
-            desc_col = col
-        if "withdraw" in col.lower() or "debit" in col.lower():
-            withdraw_col = col
-        if "deposit" in col.lower() or "credit" in col.lower():
-            deposit_col = col
-
-    if not desc_col:
-        st.error("❌ Description column not found")
-        st.stop()
-
-    bank_df.rename(columns={desc_col: "Description"}, inplace=True)
-
-    bank_df["Amount"] = bank_df[withdraw_col].fillna(0) if withdraw_col else 0
-    bank_df["Income"] = bank_df[deposit_col].fillna(0) if deposit_col else 0
-
-    bank_df["Amount"] = bank_df["Amount"].abs()
-    bank_df["Income"] = bank_df["Income"].abs()
-
-    bank_df = bank_df[(bank_df["Amount"] > 0) | (bank_df["Income"] > 0)]
-
-    if "Date" not in bank_df.columns:
-        st.error("❌ Date column missing")
-        st.stop()
-
-    return bank_df
-
+uploaded_file = st.file_uploader(
+    "Upload CSV, Excel or PDF",
+    type=["csv", "xlsx", "xls", "pdf"]
+)
 
 # ---------------- PROCESS FILE ----------------
 if uploaded_file is not None:
     try:
-        if uploaded_file.name.endswith(".csv"):
+
+        file_name = uploaded_file.name.lower()
+
+        # ---------- HANDLE PDF ----------
+        if file_name.endswith(".pdf"):
+            st.warning("⚠️ PDF parsing not supported yet.")
+            st.info("👉 Please download bank statement as Excel (.xls) from your bank.")
+            st.stop()
+
+        # ---------- HANDLE CSV ----------
+        elif file_name.endswith(".csv"):
             bank_df = pd.read_csv(uploaded_file)
-        else:
+
+        # ---------- HANDLE EXCEL ----------
+        elif file_name.endswith(".xlsx") or file_name.endswith(".xls"):
             bank_df = pd.read_excel(uploaded_file)
+
+        else:
+            st.error("Unsupported file format")
+            st.stop()
 
         st.write("Preview:", bank_df.head())
 
+        # Process bank data
         bank_df = process_bank_data(bank_df)
 
         bank_df["Category"] = bank_df["Description"].apply(categorize_expense)
@@ -137,8 +104,7 @@ if uploaded_file is not None:
         st.success("Bank data imported successfully ✅")
 
     except Exception as e:
-        st.error(f"Error: {e}")
-
+        st.error(f"Error processing file: {e}")
 
 # ---------------- ADD EXPENSE ----------------
 st.subheader("➕ Add Expense")
