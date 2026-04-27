@@ -5,15 +5,46 @@ from datetime import date
 from storage import load_data, save_data
 from advisor import chat_with_advisor
 
+# PDF imports
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+
 # MUST BE FIRST
 st.set_page_config(page_title="AI Financial Advisor", layout="wide")
 
 st.title("💰 AI Financial Advisor Agent")
 
+# ---------------- PDF FUNCTION ----------------
+def generate_pdf(total_expense, avg_daily, category_sum, savings):
+    file_path = "financial_report.pdf"
+
+    doc = SimpleDocTemplate(file_path)
+    styles = getSampleStyleSheet()
+
+    content = []
+
+    content.append(Paragraph("AI Financial Advisor Report", styles["Title"]))
+    content.append(Spacer(1, 10))
+
+    content.append(Paragraph(f"Total Expense: ₹{total_expense}", styles["Normal"]))
+    content.append(Paragraph(f"Average Daily Spend: ₹{avg_daily}", styles["Normal"]))
+    content.append(Paragraph(f"Savings: ₹{savings}", styles["Normal"]))
+    content.append(Spacer(1, 10))
+
+    content.append(Paragraph("Category Breakdown:", styles["Heading2"]))
+
+    for category, amount in category_sum.items():
+        content.append(Paragraph(f"{category}: ₹{amount}", styles["Normal"]))
+
+    doc.build(content)
+
+    return file_path
+
+
 # ---------------- LOAD DATA ----------------
 df = load_data()
 
-# ---------------- USER SETTINGS ----------------
+# ---------------- SETTINGS ----------------
 st.subheader("⚙️ Personal Settings")
 
 colA, colB = st.columns(2)
@@ -26,12 +57,13 @@ with colB:
 
 mode = st.selectbox("Advisor Mode", ["Normal", "Strict 😈"])
 
+
 # ---------------- FILE UPLOAD ----------------
 st.subheader("📂 Upload Bank Statement")
 
 uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
 
-# ---------------- CATEGORY LOGIC ----------------
+
 def categorize_expense(desc):
     desc = str(desc).lower()
 
@@ -48,12 +80,11 @@ def categorize_expense(desc):
     else:
         return "Other"
 
-# ---------------- BANK PROCESSOR ----------------
+
 def process_bank_data(bank_df):
 
     bank_df.columns = [col.strip() for col in bank_df.columns]
 
-    # Detect columns
     desc_col, withdraw_col, deposit_col = None, None, None
 
     for col in bank_df.columns:
@@ -70,7 +101,6 @@ def process_bank_data(bank_df):
 
     bank_df.rename(columns={desc_col: "Description"}, inplace=True)
 
-    # Amount logic
     bank_df["Amount"] = bank_df[withdraw_col].fillna(0) if withdraw_col else 0
     bank_df["Income"] = bank_df[deposit_col].fillna(0) if deposit_col else 0
 
@@ -79,12 +109,12 @@ def process_bank_data(bank_df):
 
     bank_df = bank_df[(bank_df["Amount"] > 0) | (bank_df["Income"] > 0)]
 
-    # Date handling
     if "Date" not in bank_df.columns:
         st.error("❌ Date column missing")
         st.stop()
 
     return bank_df
+
 
 # ---------------- PROCESS FILE ----------------
 if uploaded_file is not None:
@@ -110,6 +140,7 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error: {e}")
 
+
 # ---------------- ADD EXPENSE ----------------
 st.subheader("➕ Add Expense")
 
@@ -130,9 +161,11 @@ if st.button("Add Expense"):
     save_data(df)
     st.success("Expense Added ✅")
 
-# ---------------- DISPLAY DATA ----------------
+
+# ---------------- DISPLAY ----------------
 st.subheader("📊 Expense Data")
 st.write(df)
+
 
 # ---------------- ANALYSIS ----------------
 if not df.empty:
@@ -145,7 +178,6 @@ if not df.empty:
     st.subheader(f"💸 Total Expense: ₹{total_expense}")
     st.write(f"📊 Avg Daily Spend: ₹{avg_daily}")
 
-    # Category Graph
     category_sum = df.groupby("Category")["Amount"].sum()
 
     st.subheader("📈 Category Spending")
@@ -153,7 +185,6 @@ if not df.empty:
     category_sum.plot(kind="bar")
     st.pyplot(plt)
 
-    # Daily Trend
     st.subheader("📅 Daily Trend")
     daily = df.groupby("Date")["Amount"].sum()
 
@@ -161,7 +192,6 @@ if not df.empty:
     daily.plot(marker='o')
     st.pyplot(plt)
 
-    # Monthly
     st.subheader("📆 Monthly Summary")
     df["Month"] = df["Date"].dt.to_period("M")
     monthly = df.groupby("Month")["Amount"].sum()
@@ -170,7 +200,6 @@ if not df.empty:
     monthly.plot(marker='o')
     st.pyplot(plt)
 
-    # Income logic
     total_income = salary
     savings = total_income - total_expense
 
@@ -184,10 +213,29 @@ if not df.empty:
         else:
             st.warning("⚠️ Not meeting saving goal")
 
+    # ---------------- PDF DOWNLOAD ----------------
+    if st.button("📄 Generate Financial Report"):
+
+        pdf_file = generate_pdf(
+            total_expense,
+            avg_daily,
+            category_sum.to_dict(),
+            savings
+        )
+
+        with open(pdf_file, "rb") as f:
+            st.download_button(
+                label="⬇️ Download PDF",
+                data=f,
+                file_name="financial_report.pdf",
+                mime="application/pdf"
+            )
+
 else:
     category_sum = {}
     total_expense = 0
     avg_daily = 0
+
 
 # ---------------- CHAT ----------------
 st.subheader("💬 AI Financial Chat Advisor")
