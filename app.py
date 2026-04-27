@@ -67,14 +67,18 @@ def process_bank_data(bank_df):
 
     bank_df = bank_df.dropna(how="all").reset_index(drop=True)
 
-    # Detect header row dynamically
-    for i in range(min(5, len(bank_df))):
-        row = bank_df.iloc[i].astype(str).str.lower()
-        if any("date" in cell for cell in row):
-            bank_df.columns = bank_df.iloc[i]
-            bank_df = bank_df[i+1:]
-            break
+    # Try to find header row safely
+for i in range(min(5, len(bank_df))):
 
+    row = bank_df.iloc[i]
+
+    row_values = [str(cell).lower() for cell in row if pd.notna(cell)]
+
+    if any("date" in cell for cell in row_values):
+        bank_df.columns = bank_df.iloc[i]
+        bank_df = bank_df[i+1:]
+        break
+        
     bank_df.columns = [str(col).strip() for col in bank_df.columns]
     bank_df = bank_df.loc[:, ~bank_df.columns.str.contains('^Unnamed')]
 
